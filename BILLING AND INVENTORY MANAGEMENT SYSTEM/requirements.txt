@@ -1,0 +1,4 @@
+# Required Python Libraries for Business Transaction Manager
+tkcalendar==1.6.1
+openpyxl==3.1.5
+reportlab==4.2.2
