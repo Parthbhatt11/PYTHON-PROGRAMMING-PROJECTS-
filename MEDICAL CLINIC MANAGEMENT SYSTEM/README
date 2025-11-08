@@ -1,0 +1,46 @@
+# 🏥 Medical Management System (Modern)
+
+A complete hospital management desktop application built using Python, Tkinter, SQLite, and ReportLab.  
+This system manages doctors, patients, appointments, billing, invoices, and pharmacy inventory — all with a clean, modern GUI.
+
+## 🚀 Features
+- Doctor & Patient Management
+- Appointment Scheduling with Conflict Detection
+- Medicine & Inventory Management
+- Billing and PDF Invoice Generation
+- Configurable Clinic Settings
+- Dashboard with Stats (Patients, Doctors, Appointments, Inventory)
+- Modular Design (Scalable for future features)
+
+## 🛠️ Installation
+1. Clone the repository
+   git clone https://github.com/Parthbhatt11/Medical-Management-System.git
+
+2. Navigate into the folder
+   cd Medical-Management-System
+
+3. Install dependencies
+   pip install -r requirements.txt
+
+4. Run the application
+   python main_modern.py
+
+## 📦 Project Structure
+Medical-Management-System/
+│
+├── database/          → Database & setup scripts
+├── invoices/          → Stores generated invoices (empty in repo)
+├── reports/           → Stores reports (empty in repo)
+├── modules/           → Reusable modules (login, patient, etc.)
+├── main_modern.py     → Main entry file
+├── requirements.txt   → Libraries
+├── README.md          → Documentation
+├── LICENSE.txt        → License info
+└── .gitignore         → Ignored files list
+
+## 🧑‍💻 Author
+Parth Bhatt  
+Nanhi Pari Seemant Engineering College, Pithoragarh
+
+## 🪪 License
+Licensed under the MIT License — see LICENSE.txt for details.
