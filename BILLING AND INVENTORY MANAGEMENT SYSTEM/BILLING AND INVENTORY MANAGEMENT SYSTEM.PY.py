@@ -13,7 +13,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-# --- Import for date entry ---
+# --- NEW: Import for date entry ---
 try:
     from tkcalendar import DateEntry
     CALENDAR_ENABLED = True
@@ -41,11 +41,11 @@ ROW_EVEN = "#F8FBFF"
 
 # ------------------- GLOBAL DATA (IN-MEMORY CACHE) -------------------
 bills = []
-inventory = {} 
+inventory = {} # Format: {"item_name_lowercase": {"name": "Item Name", "stock": 10, "cost_price": 0, ...}}
 business_profile = {"name": "Your Business", "address": "123 Main St", "phone": "555-1234", "gstin": ""}
 sale_count = 0
 purchase_count = 0
-current_items = [] 
+current_items = [] # Temp list for bill form
 
 # --- UI GLOBALS ---
 root = None
@@ -221,8 +221,8 @@ def update_stock_db(item_name, quantity_change):
     conn.close()
     
     if inventory_tree:
-        refresh_inventory_table() 
-    update_main_dashboard_summary() 
+        refresh_inventory_table() # Refresh UI
+    update_main_dashboard_summary() # Update inventory value
 
 def adjust_stock_for_bill(bill_data, action="add"):
     bill_type = bill_data["type"]
@@ -299,6 +299,8 @@ def edit_bill_db(original_bill, new_bill_data):
         bill_id = original_bill['id']
         
         # 1. Update the main bill entry
+        # Note: We don't update the date of the original bill
+        # --- FIX: Use 'bill_no' key ---
         cursor.execute("""
         UPDATE bills SET
             customer = ?, mode = ?, grand_total = ?, type = ?, bill_no = ?
@@ -331,7 +333,7 @@ def edit_bill_db(original_bill, new_bill_data):
 
         # 4. Adjust stock
         adjust_stock_for_bill(original_bill, action="remove") # Revert old
-        adjust_stock_for_bill(new_bill_data, action="add")     # Apply new
+        adjust_stock_for_bill(new_bill_data, action="add")    # Apply new
         
         # 5. Update in-memory list
         for i, b in enumerate(bills):
@@ -652,9 +654,9 @@ def add_item_to_current():
         stock_available = get_stock(name)
         if qty_needed > stock_available:
             messagebox.showwarning("Low Stock", 
-                                f"Warning: Not enough stock for '{name}'.\n"
-                                f"Total Needed: {qty_needed}, Available: {stock_available}\n"
-                                "You can proceed, but stock will go negative.")
+                                   f"Warning: Not enough stock for '{name}'.\n"
+                                   f"Total Needed: {qty_needed}, Available: {stock_available}\n"
+                                   "You can proceed, but stock will go negative.")
             
     current_items.append({"name": name, "qty": qty, "price": price, "total": qty * price})
     refresh_items_tree()
@@ -691,9 +693,9 @@ def refresh_table(filter_text="", filter_type="All"):
     if filter_text:
         ft = filter_text.lower()
         filtered = [b for b in filtered if (ft in str(b["bill_no"]).lower()
-                            or ft in b.get("customer", "").lower()
-                            or ft in first_item_display(b).lower())]
-                            
+                        or ft in b.get("customer", "").lower()
+                        or ft in first_item_display(b).lower())]
+                        
     for idx, b in enumerate(filtered, start=1):
         tag = "even" if idx % 2 == 0 else "odd"
         tree.insert("", tk.END, values=(
@@ -871,145 +873,161 @@ def delete_bill():
 # --- PDF / EXPORT (Unchanged) ---
 # --- NEW: Revamped PDF creation for better design ---
 def create_invoice_pdf():
-    if not tree: return
+    if not tree:
+        return
     sel = tree.focus()
     if not sel:
-        messagebox.showwarning("Select Bill", "Select a bill to create invoice."); return
+        messagebox.showwarning("Select Bill", "Select a bill to create invoice.")
+        return
+
     bill_id = int(sel)
     bill_data = next((b for b in bills if b["id"] == bill_id), None)
     if not bill_data:
-        messagebox.showerror("Not Found", "Bill data not found."); return
+        messagebox.showerror("Not Found", "Bill data not found.")
+        return
 
-    fpath = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")],
-                                         initialfile=f"Invoice_{bill_data['type']}_{bill_data['bill_no']}.pdf", title="Save Invoice PDF")
-    if not fpath: 
-        return # User cancelled
+    fpath = filedialog.asksaveasfilename(
+        defaultextension=".pdf",
+        filetypes=[("PDF Files", "*.pdf")],
+        initialfile=f"Invoice_{bill_data['type']}_{bill_data['bill_no']}.pdf",
+        title="Save Invoice PDF"
+    )
+    if not fpath:
+        return
 
+    # --- Font setup ---
     try:
-        # --- Font Loading ---
-        try:
-            # Try to load custom font
-            font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DejaVuSans.ttf")
-            if not os.path.exists(font_path): font_path = "DejaVuSans.ttf" 
-            pdfmetrics.registerFont(TTFont('DejaVuSans', font_path))
-            pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', font_path.replace("Sans.ttf", "Sans-Bold.ttf")))
-            active_font = 'DejaVuSans'
-            active_font_bold = 'DejaVuSans-Bold'
-        except Exception:
-            # Fallback to default font if custom font fails
-            active_font = 'Helvetica'
-            active_font_bold = 'Helvetica-Bold'
+        font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DejaVuSans.ttf")
+        if not os.path.exists(font_path):
+            font_path = "DejaVuSans.ttf"
+        pdfmetrics.registerFont(TTFont('DejaVuSans', font_path))
+        bold_font_path = font_path.replace("Sans.ttf", "Sans-Bold.ttf")
+        if os.path.exists(bold_font_path):
+            pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', bold_font_path))
+        active_font = 'DejaVuSans'
+        active_font_bold = 'DejaVuSans-Bold'
+    except Exception:
+        active_font = 'Helvetica'
+        active_font_bold = 'Helvetica-Bold'
 
-        doc = SimpleDocTemplate(fpath, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch, leftMargin=0.5*inch, rightMargin=0.5*inch)
-        styles = getSampleStyleSheet()
-        
-        # --- START OF FIX ---
-        # Modify the existing 'Title' style instead of adding a new one
-        styles['Title'].fontName = active_font_bold
-        styles['Title'].fontSize = 20
-        styles['Title'].alignment = 0
-        styles['Title'].textColor = colors.HexColor(ACCENT)
-        # --- END OF FIX ---
-        
-        # Add all other custom styles (these names are unique)
-        styles.add(ParagraphStyle(name='BusinessInfo', fontName=active_font, fontSize=10, alignment=0))
-        styles.add(ParagraphStyle(name='InvoiceHeader', fontName=active_font_bold, fontSize=12, alignment=2))
-        styles.add(ParagraphStyle(name='BillTo', fontName=active_font, fontSize=10, alignment=0))
-        styles.add(ParagraphStyle(name='TotalText', fontName=active_font_bold, fontSize=12, alignment=2))
-        styles.add(ParagraphStyle(name='TotalAmount', fontName=active_font_bold, fontSize=12, alignment=2, textColor=colors.HexColor(ACCENT)))
-        styles.add(ParagraphStyle(name='Footer', fontName=active_font, fontSize=9, alignment=1))
+    # --- PDF setup ---
+    doc = SimpleDocTemplate(
+        fpath, pagesize=A4,
+        topMargin=0.5 * inch, bottomMargin=0.5 * inch,
+        leftMargin=0.5 * inch, rightMargin=0.5 * inch
+    )
+    styles = getSampleStyleSheet()
 
-        elements = []
+    # --- Custom styles (safe add) ---
+    def add_style_safe(name, **kwargs):
+        if name not in styles:
+            styles.add(ParagraphStyle(name=name, **kwargs))
+        else:
+            for k, v in kwargs.items():
+                setattr(styles[name], k, v)
 
-        # --- Header ---
-        # This will now use the modified 'Title' style correctly
-        header_data = [
-            [Paragraph(business_profile['name'], styles['Title']), Paragraph(f"INVOICE / {bill_data['type'].upper()}", styles['InvoiceHeader'])],
-            [Paragraph(business_profile['address'], styles['BusinessInfo']), Paragraph(f"<b>Bill No:</b> {bill_data['bill_no']}", styles['BusinessInfo'])],
-            [Paragraph(f"Phone: {business_profile['phone']}", styles['BusinessInfo']), Paragraph(f"<b>Date:</b> {bill_data.get('date', 'N/A')}", styles['BusinessInfo'])],
-            [Paragraph(f"GSTIN: {business_profile['gstin']}", styles['BusinessInfo']), Paragraph(f"<b>Mode:</b> {bill_data['mode']}", styles['BusinessInfo'])],
-        ]
-        header_table = Table(header_data, colWidths=[3.5*inch, 3.5*inch])
-        header_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-        ]))
-        elements.append(header_table)
-        elements.append(Spacer(1, 0.25*inch))
-        
-        # --- Bill To ---
-        bill_to_data = [
-            [Paragraph("<b>BILL TO:</b>", styles['BillTo'])],
-            [Paragraph(bill_data['customer'], styles['BillTo'])],
-        ]
-        bill_to_table = Table(bill_to_data, colWidths=[doc.width])
-        bill_to_table.setStyle(TableStyle([('BOX', (0,0), (0,-1), 0.5, colors.grey)]))
-        elements.append(bill_to_table)
-        elements.append(Spacer(1, 0.25*inch))
+    add_style_safe('CustomTitle', fontName=active_font_bold, fontSize=20,
+                   alignment=0, textColor=colors.HexColor(ACCENT))
+    add_style_safe('BusinessInfo', fontName=active_font, fontSize=10, alignment=0)
+    add_style_safe('InvoiceHeader', fontName=active_font_bold, fontSize=12, alignment=2)
+    add_style_safe('BillTo', fontName=active_font, fontSize=10, alignment=0)
+    add_style_safe('TotalText', fontName=active_font_bold, fontSize=12, alignment=2)
+    add_style_safe('TotalAmount', fontName=active_font_bold, fontSize=12,
+                   alignment=2, textColor=colors.HexColor(ACCENT))
+    add_style_safe('Footer', fontName=active_font, fontSize=9, alignment=1)
 
-        # --- Items Table ---
-        data = [["S.No", "Item Description", "Qty", "Price (Rs.)", "Total (Rs.)"]]
-        items = bill_data.get("items", [])
-        for i, it in enumerate(items, start=1):
-            data.append([
-                str(i), 
-                Paragraph(it["name"], styles['BodyText']), # 'BodyText' is another safe, default style
-                str(it["qty"]), 
-                format_currency(it["price"]), 
-                format_currency(it["total"])
-            ])
+    elements = []
 
-        table = Table(data, colWidths=[0.5*inch, 3.5*inch, 0.75*inch, 1.15*inch, 1.15*inch])
-        table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), active_font),
-            ('FONTNAME', (0, 0), (-1, 0), active_font_bold),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(ACCENT)),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('ALIGN', (0, 1), (0, -1), 'CENTER'),
-            ('ALIGN', (2, 1), (2, -1), 'CENTER'),
-            ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(table)
-        
-        # --- Totals ---
-        total_data = [
-            [Paragraph("Grand Total:", styles['TotalText']), Paragraph(format_currency(bill_data.get("grand_total", 0)), styles['TotalAmount'])]
-        ]
-        total_table = Table(total_data, colWidths=[5.5*inch, 1.5*inch])
-        total_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-        ]))
-        elements.append(Spacer(1, 0.2*inch))
-        elements.append(total_table)
-        
-        # --- Footer ---
-        elements.append(Spacer(1, 0.5*inch))
-        elements.append(Paragraph("THANK YOU FOR YOUR BUSINESS!", styles['Footer']))
+    # --- Header ---
+    header_data = [
+        [Paragraph(business_profile['name'], styles['CustomTitle']),
+         Paragraph(f"INVOICE / {bill_data['type'].upper()}", styles['InvoiceHeader'])],
+        [Paragraph(business_profile['address'], styles['BusinessInfo']),
+         Paragraph(f"<b>Bill No:</b> {bill_data['bill_no']}", styles['BusinessInfo'])],
+        [Paragraph(f"Phone: {business_profile['phone']}", styles['BusinessInfo']),
+         Paragraph(f"<b>Date:</b> {bill_data.get('date', 'N/A')}", styles['BusinessInfo'])],
+        [Paragraph(f"GSTIN: {business_profile['gstin']}", styles['BusinessInfo']),
+         Paragraph(f"<b>Mode:</b> {bill_data['mode']}", styles['BusinessInfo'])]
+    ]
+    header_table = Table(header_data, colWidths=[3.5 * inch, 3.5 * inch])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT')
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 0.25 * inch))
 
-        def add_footer(canvas, doc):
-            canvas.saveState()
-            canvas.setFont(active_font, 9)
-            canvas.drawCentredString(A4[0]/2, 0.25*inch, f"Page {doc.page} | {business_profile['name']}")
-            canvas.restoreState()
+    # --- Bill To section ---
+    bill_to_data = [
+        [Paragraph("<b>BILL TO:</b>", styles['BillTo'])],
+        [Paragraph(bill_data['customer'], styles['BillTo'])]
+    ]
+    bill_to_table = Table(bill_to_data, colWidths=[doc.width])
+    bill_to_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 0.5, colors.grey)
+    ]))
+    elements.append(bill_to_table)
+    elements.append(Spacer(1, 0.25 * inch))
 
-        # Build the doc
-        doc.build(elements, onFirstPage=add_footer, onLaterPages=add_footer)
-        
-        messagebox.showinfo("Invoice Created", f"✅ Invoice PDF saved as {os.path.basename(fpath)}")
-        set_status(f"Invoice PDF created for Bill #{bill_data['bill_no']}")
+    # --- Items Table ---
+    data = [["S.No", "Item Description", "Qty", "Price (Rs.)", "Total (Rs.)"]]
+    for i, it in enumerate(bill_data.get("items", []), start=1):
+        data.append([
+            str(i),
+            Paragraph(it["name"], styles['BodyText']),
+            str(it["qty"]),
+            format_currency(it["price"]),
+            format_currency(it["total"])
+        ])
 
-    except Exception as e:
-        # The generic error handler will now catch any other issues
-        messagebox.showerror("PDF Error", f"Failed to save PDF.\n\nError: {e}\n\nCommon causes:\n- You do not have permission to save here.\n- The file is already open in another program.")
-        set_status(f"Failed to create PDF: {e}")
-        
+    table = Table(data, colWidths=[0.5 * inch, 3.5 * inch, 0.75 * inch, 1.15 * inch, 1.15 * inch])
+    table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), active_font_bold),
+        ('FONTNAME', (0, 1), (-1, -1), active_font),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(ACCENT)),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+        ('ALIGN', (2, 1), (2, -1), 'CENTER'),
+        ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6)
+    ]))
+    elements.append(table)
+
+    # --- Totals ---
+    total_data = [
+        [Paragraph("Grand Total:", styles['TotalText']),
+         Paragraph(format_currency(bill_data.get("grand_total", 0)), styles['TotalAmount'])]
+    ]
+    total_table = Table(total_data, colWidths=[5.5 * inch, 1.5 * inch])
+    total_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (0, 0), (-1, -1), 'RIGHT')
+    ]))
+    elements.append(Spacer(1, 0.2 * inch))
+    elements.append(total_table)
+
+    # --- Footer ---
+    elements.append(Spacer(1, 0.5 * inch))
+    elements.append(Paragraph("THANK YOU FOR YOUR BUSINESS!", styles['Footer']))
+
+    def add_footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont(active_font, 9)
+        canvas.drawCentredString(A4[0] / 2, 0.25 * inch,
+                                f"Page {doc.page} | {business_profile['name']}")
+        canvas.restoreState()
+
+    # --- Build PDF ---
+    doc.build(elements, onFirstPage=add_footer, onLaterPages=add_footer)
+    messagebox.showinfo("Invoice Created", f"✅ Invoice PDF saved as {os.path.basename(fpath)}")
+    set_status(f"Invoice PDF created for Bill #{bill_data['bill_no']}")
+
+
 def show_ledger():
     if not customer_entry: return
     name = customer_entry.get().strip()
@@ -1028,7 +1046,7 @@ def export_bills_excel():
     if not bills:
         messagebox.showwarning("No Data", "No bills to export."); return
     fpath = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")],
-                                        initialfile="bills_data.xlsx", title="Export bills to Excel")
+                                         initialfile="bills_data.xlsx", title="Export bills to Excel")
     if not fpath: return
     wb = Workbook(); ws = wb.active; ws.title = "Bills"
     headers = ["S.No", "BillNo", "Date", "Type", "Customer", "Items (name x qty)", "QtyTotal", "PriceSummary", "Mode", "Grand Total"]
@@ -1093,7 +1111,7 @@ def export_report_excel():
     if not report_tree or not report_tree.get_children():
         messagebox.showwarning("No Data", "No report data to export. Run a report first."); return
     fpath = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")],
-                                        initialfile="sales_report.xlsx", title="Export Report to Excel")
+                                         initialfile="sales_report.xlsx", title="Export Report to Excel")
     if not fpath: return
 
     wb = Workbook(); ws = wb.active; ws.title = "Sales Report"
@@ -1115,7 +1133,7 @@ def export_customers_excel():
     if not customer_tree or not customer_tree.get_children():
         messagebox.showwarning("No Data", "No customer data to export. Refresh the list first."); return
     fpath = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")],
-                                        initialfile="customer_list.xlsx", title="Export Customers to Excel")
+                                         initialfile="customer_list.xlsx", title="Export Customers to Excel")
     if not fpath: return
 
     wb = Workbook(); ws = wb.active; ws.title = "Customers"
